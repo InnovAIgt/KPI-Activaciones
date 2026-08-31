@@ -1,0 +1,28 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring" x1="30" y1="20" x2="170" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F5F5"/>
+      <stop offset="0.35" stop-color="#B8B8B8"/>
+      <stop offset="0.68" stop-color="#F2F2F2"/>
+      <stop offset="1" stop-color="#8D8D8D"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(88 72) rotate(53.1301) scale(126.607)">
+      <stop stop-color="#FF5C6D"/>
+      <stop offset="0.5" stop-color="#D62A39"/>
+      <stop offset="1" stop-color="#8E1220"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="100" cy="100" r="92" fill="url(#ring)"/>
+  <circle cx="100" cy="100" r="80" fill="#2A2A2A" fill-opacity="0.08"/>
+  <circle cx="100" cy="100" r="76" fill="url(#core)"/>
+  <circle cx="100" cy="100" r="64" fill="#C71A2A" fill-opacity="0.17"/>
+
+  <g fill="#F4F2F3">
+    <path d="M47 108.5C47 92.6 59.6 80 75.5 80H95.5C109 80 120 91 120 104.5V107.5C120 121 109 132 95.5 132H75.5C59.6 132 47 119.4 47 103.5V108.5Z" fill="#F4F2F3" fill-opacity="0.12"/>
+    <circle cx="100" cy="100" r="7" fill="#F6F3F3"/>
+    <path d="M76 90C79.8 80.4 88.4 74 99 74C110.8 74 120.8 82.2 124.8 94L145 104C140.1 76.9 119.8 56 95 56C67.4 56 45 78.4 45 106V117C45 120.5 48.5 124 52 124H71C71 124 75.5 122.5 78.5 118.5L93 97.5C89 95.5 84.5 92 76 90Z" fill="#F6F3F3" fill-opacity="0.13"/>
+  </g>
+
+  <text x="100" y="116" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="900" fill="#F8F3F4" letter-spacing="2">RED</text>
+</svg>

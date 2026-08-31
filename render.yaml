@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kpi-activaciones
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: WORKFLOW_API_URL
+        value: https://workflow.red.com.gt/api/integraciones/dashboard/preofertas
+      - key: DASHBOARD_API_KEY
+        sync: false
+      - key: DEMO_MODE
+        value: "false"
