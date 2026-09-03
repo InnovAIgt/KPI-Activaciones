@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Activity, ChevronDown, ChevronRight, CircleAlert, Clock3, Download, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, X } from 'lucide-react'
 import './styles.css'
+import './analytics.css'
 
 const statusLabels = { no_iniciada: 'No iniciada', en_proceso: 'En proceso', finalizada: 'Finalizada', cancelada: 'Cancelada' }
 const statusTone = { no_iniciada: 'muted', en_proceso: 'blue', finalizada: 'green', cancelada: 'red' }
@@ -45,6 +46,22 @@ function getCurrentMonthRange() {
   const start = new Date(today.getFullYear(), today.getMonth(), 1)
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
   return { start: formatDateInput(start), end: formatDateInput(end) }
+}
+
+function ChartBars({ values, emptyLabel = 'Sin datos' }) {
+  const max = Math.max(...values.map((entry) => entry.count), 1)
+  if (!values.length) return <div className="chart-empty">{emptyLabel}</div>
+  return <div className="chart-bars">{values.map((entry) => <div className="chart-bar-row" key={entry.label}>
+    <span title={entry.label}>{entry.label}</span><div className="chart-track"><div className={`chart-fill ${entry.tone || ''}`} style={{ width: `${Math.max((entry.count / max) * 100, 4)}%` }} /></div><strong>{entry.count}</strong>
+  </div>)}</div>
+}
+
+function StatusChart({ counts }) {
+  const total = Math.max(counts.total, 1)
+  const segments = [{ label: 'Finalizadas', count: counts.done, tone: 'green' }, { label: 'En proceso', count: counts.active, tone: 'blue' }, { label: 'Por iniciar', count: counts.pending, tone: 'muted' }, { label: 'Canceladas', count: counts.cancelled, tone: 'red' }]
+  let offset = 0
+  const gradient = segments.map((segment) => { const start = offset; offset += segment.count / total * 100; return `var(--chart-${segment.tone}) ${start}% ${offset}%` }).join(', ')
+  return <div className="status-chart"><div className="donut-chart" style={{ background: `conic-gradient(${gradient})` }}><div><strong>{counts.total}</strong><span>Ofertas</span></div></div><div className="chart-legend">{segments.map((segment) => <div key={segment.label}><i className={segment.tone} />{segment.label}<strong>{segment.count}</strong></div>)}</div></div>
 }
 
 function App() {
@@ -115,7 +132,19 @@ function App() {
     })
   }, [items, query, country, status, businessType, stageFilter, dateFrom, dateTo])
 
-  const counts = useMemo(() => ({ total: filteredItems.length, active: filteredItems.filter((item) => item.estado === 'en_proceso').length, done: filteredItems.filter((item) => item.estado === 'finalizada').length }), [filteredItems])
+  const counts = useMemo(() => ({ total: filteredItems.length, active: filteredItems.filter((item) => item.estado === 'en_proceso').length, done: filteredItems.filter((item) => item.estado === 'finalizada').length, pending: filteredItems.filter((item) => item.estado === 'no_iniciada').length, cancelled: filteredItems.filter((item) => item.estado === 'cancelada').length }), [filteredItems])
+
+  const chartData = useMemo(() => {
+    const stages = new Map()
+    const types = new Map()
+    filteredItems.forEach((item) => {
+      const stage = item.proceso?.etapaActual?.nombre || (item.estado === 'en_proceso' ? 'Etapa no definida' : 'Sin etapa activa')
+      const type = item.proceso?.tipo?.replaceAll('_', ' ') || item.negocio || 'Sin tipo'
+      stages.set(stage, (stages.get(stage) || 0) + 1); types.set(type, (types.get(type) || 0) + 1)
+    })
+    const toEntries = (map) => [...map].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count }))
+    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6) }
+  }, [filteredItems])
 
   function exportCsv() {
     const columns = ['Preoferta', 'Fecha', 'Empresa', 'Vendedor', 'Codigo', 'Negocio', 'Cantidad', 'Plazo', 'Contratacion', 'Pais', 'Sucursal', 'Estado', 'Iniciada', 'Finalizada']
@@ -131,6 +160,7 @@ function App() {
     <header className="topbar"><div className="brand"><div className="brand-mark"><img src="/red-logo.svg" alt="RED" /></div><div><strong>RED INTELFON</strong><span>Activaciones / Preofertas</span></div></div><div className="top-actions"><span className="live"><i /> Datos en vivo</span><button className="icon-button" title="Actualizar datos" onClick={loadData}><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><button className="export-button" onClick={exportCsv}><Download size={16} /> Exportar CSV</button><button className="theme-toggle" aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button><button className="logout-button" onClick={logout}>Salir</button></div></header>
     <section className="hero"><div><p className="eyebrow">WORKFLOW DASHBOARD</p><h1>Preofertas</h1><p className="subhead">Visibilidad completa del flujo de activaciones.</p></div><div className="updated"><Clock3 size={16} /> Última sincronización <strong>{formatDate(meta?.generadoEn, true)}</strong></div></section>
     <section className="metrics"><div><span>Total de preofertas</span><strong>{counts.total}</strong><small>Registros encontrados</small></div><div><span>En proceso</span><strong className="blue-text">{counts.active}</strong><small>Requieren seguimiento</small></div><div><span>Finalizadas</span><strong className="green-text">{counts.done}</strong><small>Procesos completados</small></div></section>
+    <section className="analytics"><article className="analytics-card status-card"><div className="analytics-heading"><div><p className="eyebrow">RESUMEN OPERATIVO</p><h2>Estado de las ofertas</h2><span>Distribución del periodo seleccionado</span></div></div><StatusChart counts={counts} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">SEGUIMIENTO</p><h2>Etapa actual</h2><span>Ofertas por etapa del proceso</span></div></div><ChartBars values={chartData.stages} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Tipo de proceso</h2><span>Volumen por categoría</span></div></div><ChartBars values={chartData.types} /></article></section>
     <section className="toolbar">
       <div className="toolbar-row">
         <div className="filter-label"><SlidersHorizontal size={16} /> Filtros</div>
