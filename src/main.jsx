@@ -6,9 +6,11 @@ import './analytics.css'
 import './sla.css'
 import './sla-lines.css'
 import './country-chart.css'
+import './chart-fixes.css'
 
 const statusLabels = { no_iniciada: 'No iniciada', en_proceso: 'En proceso', finalizada: 'Finalizada', cancelada: 'Cancelada' }
 const statusTone = { no_iniciada: 'muted', en_proceso: 'blue', finalizada: 'green', cancelada: 'red' }
+const processStages = ['Gestión Inicial y Validación', 'Petición de Recursos', 'Registro en el Sistema Central', 'Preparación Técnica', 'Despliegue y Entrega']
 
 function formatDate(value, withTime = false) {
   if (!value) return '—'
@@ -203,10 +205,11 @@ function App() {
       }))
       slaByCountry[countryCode] = slaStages
     }
-    const labels = [...new Set([...slaByCountry.GT.keys(), ...slaByCountry.SV.keys()])]
+    const labels = processStages.filter((label) => slaByCountry.GT.has(label) || slaByCountry.SV.has(label))
     const toSlaEntries = (countryCode) => labels.map((label) => { const result = slaByCountry[countryCode].get(label) || { met: 0, total: 0 }; return { label, ...result, rate: result.total ? Math.round(result.met / result.total * 100) : 0 } })
     const sla = { labels, GT: toSlaEntries('GT'), SV: toSlaEntries('SV') }
-    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6), countries: toEntries(countries), sla }
+    const currentStages = processStages.map((label) => ({ label, count: stages.get(label) || 0 }))
+    return { stages: currentStages, types: toEntries(types).slice(0, 6), countries: toEntries(countries), sla }
   }, [filteredItems, meta, slaCountry])
 
   function exportCsv() {
