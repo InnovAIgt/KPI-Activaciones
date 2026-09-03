@@ -4,6 +4,8 @@ import { Activity, ChevronDown, ChevronRight, CircleAlert, Clock3, Download, Fil
 import './styles.css'
 import './analytics.css'
 import './sla.css'
+import './sla-lines.css'
+import './country-chart.css'
 
 const statusLabels = { no_iniciada: 'No iniciada', en_proceso: 'En proceso', finalizada: 'Finalizada', cancelada: 'Cancelada' }
 const statusTone = { no_iniciada: 'muted', en_proceso: 'blue', finalizada: 'green', cancelada: 'red' }
@@ -95,7 +97,17 @@ function StatusChart({ counts }) {
 }
 
 function SlaChart({ values, country, setCountry }) {
-  return <article className="analytics-card sla-card"><div className="analytics-heading"><div><p className="eyebrow">CUMPLIMIENTO SLA</p><h2>Rendimiento por etapa</h2><span>Porcentaje de etapas completadas a tiempo</span></div><select className="chart-filter" value={country} onChange={(event) => setCountry(event.target.value)}><option value="todos">Todos</option><option value="GT">GT</option><option value="SV">SV</option></select></div><div className="sla-chart">{values.map((entry) => <div className="sla-point" key={entry.label}><span>{entry.label}</span><div className="sla-line"><i style={{ height: `${Math.max(entry.rate, 4)}%` }} /></div><strong>{entry.rate}%</strong><small>{entry.met}/{entry.total} a tiempo</small></div>)}</div></article>
+  const visible = country === 'todos' ? ['GT', 'SV'] : [country]
+  const width = 900; const height = 240; const left = 44; const right = 18; const top = 18; const bottom = 56
+  const stages = values.labels
+  const x = (index) => stages.length === 1 ? width / 2 : left + index * ((width - left - right) / (stages.length - 1))
+  const y = (rate) => top + (100 - rate) * ((height - top - bottom) / 100)
+  const linePoints = (entries) => entries.map((entry, index) => `${x(index)},${y(entry.rate)}`).join(' ')
+  return <article className="analytics-card sla-card"><div className="analytics-heading"><div><p className="eyebrow">CUMPLIMIENTO SLA</p><h2>Rendimiento por etapa</h2><span>Porcentaje de etapas completadas a tiempo</span></div><select className="chart-filter" value={country} onChange={(event) => setCountry(event.target.value)}><option value="todos">GT y SV</option><option value="GT">Solo GT</option><option value="SV">Solo SV</option></select></div><div className="line-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Cumplimiento SLA por etapa y país"><g className="chart-grid">{[0, 25, 50, 75, 100].map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} /><text x="4" y={y(tick) + 4}>{tick}%</text></g>)}</g>{visible.map((countryCode) => <g key={countryCode} className={`country-line ${countryCode.toLowerCase()}`}><polyline points={linePoints(values[countryCode])} /><g>{values[countryCode].map((entry, index) => <g key={entry.label}><circle cx={x(index)} cy={y(entry.rate)} r="5" /><text className="point-value" x={x(index)} y={y(entry.rate) - 11}>{entry.rate}%</text></g>)}</g></g>)}<g className="stage-labels">{stages.map((label, index) => <text key={label} x={x(index)} y={height - 22}>{label}</text>)}</g></svg><div className="line-legend">{visible.map((countryCode) => <span key={countryCode} className={countryCode.toLowerCase()}><i />{countryCode === 'GT' ? 'Guatemala' : 'El Salvador'}</span>)}</div><div className="line-summary">{visible.map((countryCode) => <span key={countryCode}><b>{countryCode}</b> {values[countryCode].reduce((sum, entry) => sum + entry.met, 0)}/{values[countryCode].reduce((sum, entry) => sum + entry.total, 0)} etapas a tiempo</span>)}</div></div></article>
+}
+
+function CountryChart({ values }) {
+  return <article className="analytics-card country-card"><div className="analytics-heading"><div><p className="eyebrow">COBERTURA</p><h2>Preofertas por país</h2><span>Distribución del periodo</span></div></div><ChartBars values={values} /></article>
 }
 
 function App() {
@@ -178,15 +190,23 @@ function App() {
       stages.set(stage, (stages.get(stage) || 0) + 1); types.set(type, (types.get(type) || 0) + 1)
     })
     const toEntries = (map) => [...map].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count }))
-    const slaStages = new Map()
-    filteredItems.filter((item) => slaCountry === 'todos' || item.pais === slaCountry).forEach((item) => (item.proceso?.etapas || []).forEach((stage) => {
-      const result = stageSla(stage, meta?.generadoEn || new Date().toISOString())
-      if (!result) return
-      const current = slaStages.get(stage.nombre) || { met: 0, total: 0 }
-      current.total += 1; current.met += result.onTime ? 1 : 0; slaStages.set(stage.nombre, current)
-    }))
-    const sla = [...slaStages].sort((a, b) => a[0].localeCompare(b[0])).map(([label, result]) => ({ label, ...result, rate: Math.round(result.met / result.total * 100) }))
-    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6), sla }
+    const countries = new Map()
+    filteredItems.forEach((item) => countries.set(item.pais || 'Sin país', (countries.get(item.pais || 'Sin país') || 0) + 1))
+    const slaByCountry = {}
+    for (const countryCode of ['GT', 'SV']) {
+      const slaStages = new Map()
+      filteredItems.filter((item) => item.pais === countryCode).forEach((item) => (item.proceso?.etapas || []).forEach((stage) => {
+        const result = stageSla(stage, meta?.generadoEn || new Date().toISOString())
+        if (!result) return
+        const current = slaStages.get(stage.nombre) || { met: 0, total: 0 }
+        current.total += 1; current.met += result.onTime ? 1 : 0; slaStages.set(stage.nombre, current)
+      }))
+      slaByCountry[countryCode] = slaStages
+    }
+    const labels = [...new Set([...slaByCountry.GT.keys(), ...slaByCountry.SV.keys()])]
+    const toSlaEntries = (countryCode) => labels.map((label) => { const result = slaByCountry[countryCode].get(label) || { met: 0, total: 0 }; return { label, ...result, rate: result.total ? Math.round(result.met / result.total * 100) : 0 } })
+    const sla = { labels, GT: toSlaEntries('GT'), SV: toSlaEntries('SV') }
+    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6), countries: toEntries(countries), sla }
   }, [filteredItems, meta, slaCountry])
 
   function exportCsv() {
@@ -203,7 +223,7 @@ function App() {
     <header className="topbar"><div className="brand"><div className="brand-mark"><img src="/red-logo.svg" alt="RED" /></div><div><strong>RED INTELFON</strong><span>Activaciones / Preofertas</span></div></div><div className="top-actions"><span className="live"><i /> Datos en vivo</span><button className="icon-button" title="Actualizar datos" onClick={loadData}><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><button className="export-button" onClick={exportCsv}><Download size={16} /> Exportar CSV</button><button className="theme-toggle" aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button><button className="logout-button" onClick={logout}>Salir</button></div></header>
     <section className="hero"><div><p className="eyebrow">WORKFLOW DASHBOARD</p><h1>Preofertas</h1><p className="subhead">Visibilidad completa del flujo de activaciones.</p></div><div className="updated"><Clock3 size={16} /> Última sincronización <strong>{formatDate(meta?.generadoEn, true)}</strong></div></section>
     <section className="metrics"><div><span>Total de preofertas</span><strong>{counts.total}</strong><small>Registros encontrados</small></div><div><span>En proceso</span><strong className="blue-text">{counts.active}</strong><small>Requieren seguimiento</small></div><div><span>Finalizadas</span><strong className="green-text">{counts.done}</strong><small>Procesos completados</small></div></section>
-    <section className="analytics"><article className="analytics-card status-card"><div className="analytics-heading"><div><p className="eyebrow">RESUMEN OPERATIVO</p><h2>Estado de las ofertas</h2><span>Distribución del periodo seleccionado</span></div></div><StatusChart counts={counts} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">SEGUIMIENTO</p><h2>Etapa actual</h2><span>Solo ofertas en proceso</span></div></div><ChartBars values={chartData.stages} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Tipo de proceso</h2><span>Volumen por categoría</span></div></div><ChartBars values={chartData.types} /></article><SlaChart values={chartData.sla} country={slaCountry} setCountry={setSlaCountry} /></section>
+    <section className="analytics"><article className="analytics-card status-card"><div className="analytics-heading"><div><p className="eyebrow">RESUMEN OPERATIVO</p><h2>Estado de las ofertas</h2><span>Distribución del periodo seleccionado</span></div></div><StatusChart counts={counts} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">SEGUIMIENTO</p><h2>Etapa actual</h2><span>Solo ofertas en proceso</span></div></div><ChartBars values={chartData.stages} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Tipo de proceso</h2><span>Volumen por categoría</span></div></div><ChartBars values={chartData.types} /></article><CountryChart values={chartData.countries} /><SlaChart values={chartData.sla} country={slaCountry} setCountry={setSlaCountry} /></section>
     <section className="toolbar">
       <div className="toolbar-row">
         <div className="filter-label"><SlidersHorizontal size={16} /> Filtros</div>
