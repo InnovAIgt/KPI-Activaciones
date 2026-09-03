@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Activity, ChevronDown, ChevronRight, CircleAlert, Clock3, Download, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, X } from 'lucide-react'
 import './styles.css'
 import './analytics.css'
+import './sla.css'
 
 const statusLabels = { no_iniciada: 'No iniciada', en_proceso: 'En proceso', finalizada: 'Finalizada', cancelada: 'Cancelada' }
 const statusTone = { no_iniciada: 'muted', en_proceso: 'blue', finalizada: 'green', cancelada: 'red' }
@@ -12,11 +13,40 @@ function formatDate(value, withTime = false) {
   return new Intl.DateTimeFormat('es-GT', withTime ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' }).format(new Date(value))
 }
 
+function workingHoursBetween(startValue, endValue) {
+  if (!startValue || !endValue) return 0
+  const start = new Date(startValue)
+  const end = new Date(endValue)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return 0
+  let cursor = new Date(start)
+  let total = 0
+  while (cursor < end) {
+    const day = cursor.getDay()
+    const opening = new Date(cursor); opening.setHours(8, 0, 0, 0)
+    const closing = new Date(cursor); closing.setHours(18, 0, 0, 0)
+    if (day !== 0 && day !== 6) {
+      const from = cursor > opening ? cursor : opening
+      const to = end < closing ? end : closing
+      if (to > from) total += (to - from) / 36e5
+    }
+    cursor.setDate(cursor.getDate() + 1); cursor.setHours(0, 0, 0, 0)
+  }
+  return total
+}
+
+function stageSla(stage, consultationDate) {
+  if (!stage?.fechaInicio || !stage?.slaHoras) return null
+  const hasRealEnd = stage.fechaFin && new Date(stage.fechaFin).getFullYear() > 2001
+  const end = hasRealEnd ? stage.fechaFin : consultationDate
+  const elapsed = workingHoursBetween(stage.fechaInicio, end)
+  return { elapsed, limit: Number(stage.slaHoras), onTime: elapsed <= Number(stage.slaHoras), current: !hasRealEnd }
+}
+
 function StatusPill({ status }) {
   return <span className={`pill ${statusTone[status] || 'muted'}`}><span className="dot" />{statusLabels[status] || status}</span>
 }
 
-function Detail({ item }) {
+function Detail({ item, consultationDate }) {
   const process = item.proceso
   return <div className="detail">
     <div className="detail-grid">
@@ -28,9 +58,9 @@ function Detail({ item }) {
       <div><span>Etapa actual</span><strong>{process?.etapaActual?.nombre || '—'}</strong></div>
     </div>
     <div className="stages-title">Etapas del proceso <span>{process?.etapas?.length || 0}</span></div>
-    <div className="stages">{(process?.etapas || []).map((stage) => <div className="stage" key={`${stage.numero}-${stage.nombre}`}>
-      <div className={`stage-number ${stage.estado}`}>{stage.numero}</div><div className="stage-info"><strong>{stage.nombre}</strong><span>{stage.estado} · SLA {stage.slaHoras}h</span></div><div className="stage-date">{formatDate(stage.fechaInicio, true)}</div>
-    </div>)}</div>
+    <div className="stages">{(process?.etapas || []).map((stage) => { const sla = stageSla(stage, consultationDate); return <div className={`stage ${sla?.onTime ? 'sla-ok' : 'sla-late'}`} key={`${stage.numero}-${stage.nombre}`}>
+      <div className={`stage-number ${stage.estado}`}>{stage.numero}</div><div className="stage-info"><strong>{stage.nombre}</strong><span>{stage.estado} · SLA {stage.slaHoras}h · {sla ? `${sla.elapsed.toFixed(1)}h consumidas` : 'sin medición'}</span></div><div className="stage-result">{sla ? <><b>{sla.onTime ? 'A tiempo' : 'Vencida'}</b><small>{sla.current ? 'En curso' : 'Completada'}</small></> : '—'}</div>
+    </div>})}</div>
   </div>
 }
 
@@ -64,6 +94,10 @@ function StatusChart({ counts }) {
   return <div className="status-chart"><div className="donut-chart" style={{ background: `conic-gradient(${gradient})` }}><div><strong>{counts.total}</strong><span>Ofertas</span></div></div><div className="chart-legend">{segments.map((segment) => <div key={segment.label}><i className={segment.tone} />{segment.label}<strong>{segment.count}</strong></div>)}</div></div>
 }
 
+function SlaChart({ values, country, setCountry }) {
+  return <article className="analytics-card sla-card"><div className="analytics-heading"><div><p className="eyebrow">CUMPLIMIENTO SLA</p><h2>Rendimiento por etapa</h2><span>Porcentaje de etapas completadas a tiempo</span></div><select className="chart-filter" value={country} onChange={(event) => setCountry(event.target.value)}><option value="todos">Todos</option><option value="GT">GT</option><option value="SV">SV</option></select></div><div className="sla-chart">{values.map((entry) => <div className="sla-point" key={entry.label}><span>{entry.label}</span><div className="sla-line"><i style={{ height: `${Math.max(entry.rate, 4)}%` }} /></div><strong>{entry.rate}%</strong><small>{entry.met}/{entry.total} a tiempo</small></div>)}</div></article>
+}
+
 function App() {
   const currentMonthRange = useMemo(() => getCurrentMonthRange(), [])
   const [theme, setTheme] = useState('dark')
@@ -77,6 +111,7 @@ function App() {
   const [status, setStatus] = useState('todos')
   const [businessType, setBusinessType] = useState('todos')
   const [stageFilter, setStageFilter] = useState('todos')
+  const [slaCountry, setSlaCountry] = useState('todos')
   const [dateFrom, setDateFrom] = useState(currentMonthRange.start)
   const [dateTo, setDateTo] = useState(currentMonthRange.end)
   const [expanded, setExpanded] = useState(null)
@@ -137,14 +172,22 @@ function App() {
   const chartData = useMemo(() => {
     const stages = new Map()
     const types = new Map()
-    filteredItems.forEach((item) => {
-      const stage = item.proceso?.etapaActual?.nombre || (item.estado === 'en_proceso' ? 'Etapa no definida' : 'Sin etapa activa')
+    filteredItems.filter((item) => item.estado === 'en_proceso' && item.proceso?.etapaActual?.nombre).forEach((item) => {
+      const stage = item.proceso.etapaActual.nombre
       const type = item.proceso?.tipo?.replaceAll('_', ' ') || item.negocio || 'Sin tipo'
       stages.set(stage, (stages.get(stage) || 0) + 1); types.set(type, (types.get(type) || 0) + 1)
     })
     const toEntries = (map) => [...map].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count }))
-    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6) }
-  }, [filteredItems])
+    const slaStages = new Map()
+    filteredItems.filter((item) => slaCountry === 'todos' || item.pais === slaCountry).forEach((item) => (item.proceso?.etapas || []).forEach((stage) => {
+      const result = stageSla(stage, meta?.generadoEn || new Date().toISOString())
+      if (!result) return
+      const current = slaStages.get(stage.nombre) || { met: 0, total: 0 }
+      current.total += 1; current.met += result.onTime ? 1 : 0; slaStages.set(stage.nombre, current)
+    }))
+    const sla = [...slaStages].sort((a, b) => a[0].localeCompare(b[0])).map(([label, result]) => ({ label, ...result, rate: Math.round(result.met / result.total * 100) }))
+    return { stages: toEntries(stages).slice(0, 6), types: toEntries(types).slice(0, 6), sla }
+  }, [filteredItems, meta, slaCountry])
 
   function exportCsv() {
     const columns = ['Preoferta', 'Fecha', 'Empresa', 'Vendedor', 'Codigo', 'Negocio', 'Cantidad', 'Plazo', 'Contratacion', 'Pais', 'Sucursal', 'Estado', 'Iniciada', 'Finalizada']
@@ -160,7 +203,7 @@ function App() {
     <header className="topbar"><div className="brand"><div className="brand-mark"><img src="/red-logo.svg" alt="RED" /></div><div><strong>RED INTELFON</strong><span>Activaciones / Preofertas</span></div></div><div className="top-actions"><span className="live"><i /> Datos en vivo</span><button className="icon-button" title="Actualizar datos" onClick={loadData}><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><button className="export-button" onClick={exportCsv}><Download size={16} /> Exportar CSV</button><button className="theme-toggle" aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button><button className="logout-button" onClick={logout}>Salir</button></div></header>
     <section className="hero"><div><p className="eyebrow">WORKFLOW DASHBOARD</p><h1>Preofertas</h1><p className="subhead">Visibilidad completa del flujo de activaciones.</p></div><div className="updated"><Clock3 size={16} /> Última sincronización <strong>{formatDate(meta?.generadoEn, true)}</strong></div></section>
     <section className="metrics"><div><span>Total de preofertas</span><strong>{counts.total}</strong><small>Registros encontrados</small></div><div><span>En proceso</span><strong className="blue-text">{counts.active}</strong><small>Requieren seguimiento</small></div><div><span>Finalizadas</span><strong className="green-text">{counts.done}</strong><small>Procesos completados</small></div></section>
-    <section className="analytics"><article className="analytics-card status-card"><div className="analytics-heading"><div><p className="eyebrow">RESUMEN OPERATIVO</p><h2>Estado de las ofertas</h2><span>Distribución del periodo seleccionado</span></div></div><StatusChart counts={counts} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">SEGUIMIENTO</p><h2>Etapa actual</h2><span>Ofertas por etapa del proceso</span></div></div><ChartBars values={chartData.stages} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Tipo de proceso</h2><span>Volumen por categoría</span></div></div><ChartBars values={chartData.types} /></article></section>
+    <section className="analytics"><article className="analytics-card status-card"><div className="analytics-heading"><div><p className="eyebrow">RESUMEN OPERATIVO</p><h2>Estado de las ofertas</h2><span>Distribución del periodo seleccionado</span></div></div><StatusChart counts={counts} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">SEGUIMIENTO</p><h2>Etapa actual</h2><span>Solo ofertas en proceso</span></div></div><ChartBars values={chartData.stages} /></article><article className="analytics-card"><div className="analytics-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Tipo de proceso</h2><span>Volumen por categoría</span></div></div><ChartBars values={chartData.types} /></article><SlaChart values={chartData.sla} country={slaCountry} setCountry={setSlaCountry} /></section>
     <section className="toolbar">
       <div className="toolbar-row">
         <div className="filter-label"><SlidersHorizontal size={16} /> Filtros</div>
@@ -191,7 +234,7 @@ function App() {
       </div>
     </section>
     {error && <div className="notice"><CircleAlert size={18} /> {error}</div>}
-    <section className="table-wrap"><div className="table-scroll"><table><thead><tr><th className="expand-col" /><th>Preoferta</th><th>Fecha</th><th>Empresa</th><th>Vendedor</th><th>Negocio</th><th>Cantidad</th><th>Plazo</th><th>País</th><th>Estado</th><th>Etapa actual</th></tr></thead><tbody>{loading ? <tr><td colSpan="11" className="empty">Cargando datos...</td></tr> : filteredItems.length === 0 ? <tr><td colSpan="11" className="empty"><Filter size={26} />No hay preofertas con estos filtros.</td></tr> : filteredItems.map((item) => <><tr className={expanded === item.preOferta ? 'selected' : ''} key={item.preOferta} onClick={() => setExpanded(expanded === item.preOferta ? null : item.preOferta)}><td className="expand-col">{expanded === item.preOferta ? <ChevronDown size={17} /> : <ChevronRight size={17} />}</td><td><strong className="code">#{item.preOferta}</strong><span className="sub-cell">{item.codigo}</span></td><td>{formatDate(item.fecha)}</td><td><strong>{item.empresa}</strong></td><td>{item.vendedor}</td><td>{item.negocio}</td><td>{item.cantidad} líneas</td><td>{item.plazo} meses</td><td><span className="country"><i>{item.pais}</i></span></td><td><StatusPill status={item.estado} /></td><td>{item.proceso?.etapaActual ? <><strong>{item.proceso.etapaActual.nombre}</strong><span className="sub-cell">Etapa {item.proceso.etapaActual.numero}</span></> : '—'}</td></tr>{expanded === item.preOferta && <tr className="detail-row" key={`${item.preOferta}-detail`}><td colSpan="11"><Detail item={item} /></td></tr>}</>)}</tbody></table></div></section>
+    <section className="table-wrap"><div className="table-scroll"><table><thead><tr><th className="expand-col" /><th>Preoferta</th><th>Fecha</th><th>Empresa</th><th>Vendedor</th><th>Negocio</th><th>Cantidad</th><th>Plazo</th><th>País</th><th>Estado</th><th>Etapa actual</th></tr></thead><tbody>{loading ? <tr><td colSpan="11" className="empty">Cargando datos...</td></tr> : filteredItems.length === 0 ? <tr><td colSpan="11" className="empty"><Filter size={26} />No hay preofertas con estos filtros.</td></tr> : filteredItems.map((item) => <><tr className={expanded === item.preOferta ? 'selected' : ''} key={item.preOferta} onClick={() => setExpanded(expanded === item.preOferta ? null : item.preOferta)}><td className="expand-col">{expanded === item.preOferta ? <ChevronDown size={17} /> : <ChevronRight size={17} />}</td><td><strong className="code">#{item.preOferta}</strong><span className="sub-cell">{item.codigo}</span></td><td>{formatDate(item.fecha)}</td><td><strong>{item.empresa}</strong></td><td>{item.vendedor}</td><td>{item.negocio}</td><td>{item.cantidad} líneas</td><td>{item.plazo} meses</td><td><span className="country"><i>{item.pais}</i></span></td><td><StatusPill status={item.estado} /></td><td>{item.proceso?.etapaActual ? <><strong>{item.proceso.etapaActual.nombre}</strong><span className="sub-cell">Etapa {item.proceso.etapaActual.numero}</span></> : '—'}</td></tr>{expanded === item.preOferta && <tr className="detail-row" key={`${item.preOferta}-detail`}><td colSpan="11"><Detail item={item} consultationDate={meta?.generadoEn} /></td></tr>}</>)}</tbody></table></div></section>
     <footer><span>API Dashboard Preofertas v1.0.0</span><span>Mostrando {filteredItems.length} de {meta?.total ?? items.length} registros</span></footer>
   </main>
 }
